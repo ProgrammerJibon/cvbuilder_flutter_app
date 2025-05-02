@@ -1,8 +1,30 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http_server/http_server.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:developer';
+
+
+Future<void> copyAssetFolder(String assetFolderPath, String targetDirPath) async {
+  final manifestContent = await rootBundle.loadString('AssetManifest.json');
+  final Map<String, dynamic> manifestMap = json.decode(manifestContent);
+
+  for (final assetPath in manifestMap.keys) {
+    if (assetPath.startsWith(assetFolderPath)) {
+      final data = await rootBundle.load(assetPath);
+      final bytes = data.buffer.asUint8List();
+      final filename = assetPath.replaceFirst(assetFolderPath, '');
+      final file = File('$targetDirPath$filename');
+      await file.create(recursive: true);
+      await file.writeAsBytes(bytes);
+    }
+  }
+}
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,19 +37,35 @@ void main() async {
     await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
     final exeDir = File(Platform.resolvedExecutable).parent.path;
     await windowManager.setIcon('$exeDir/icon.ico');
+    await windowManager.setTitle('Resume Builder by Md. Jibon Howlader');
+    await windowManager.setAsFrameless();
   }
 
-  final exeDir = File(Platform.resolvedExecutable).parent.path;
-  final staticFiles = VirtualDirectory('$exeDir/dist')
-    ..allowDirectoryListing = true;
-
-
-
-  HttpServer.bind(InternetAddress.loopbackIPv4, 1059).then((server) {
-    server.listen((HttpRequest request) {
-      staticFiles.serveRequest(request);
+  if(Platform.isWindows){
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final staticFiles = VirtualDirectory('$exeDir/data/flutter_assets/assets/dist/')..allowDirectoryListing = true;
+    HttpServer.bind(InternetAddress.loopbackIPv4, 1059).then((server) {
+      server.listen((HttpRequest request) {
+        staticFiles.serveRequest(request);
+      });
     });
-  });
+  }
+  if (Platform.isAndroid) {
+    final cacheDir = await getTemporaryDirectory();
+    final distPath = '${cacheDir.path}/dist/';
+
+    await copyAssetFolder('assets/dist/', distPath);
+
+    final staticFiles = VirtualDirectory(distPath)..allowDirectoryListing = true;
+    HttpServer.bind(InternetAddress.loopbackIPv4, 1059).then((server) {
+      server.listen((HttpRequest request) {
+        staticFiles.serveRequest(request);
+      });
+    });
+  }
+
+
+
 
   runApp(const MyApp());
 }
@@ -101,7 +139,7 @@ class _WebViewLocalPageState extends State<WebViewLocalPage> {
           IconButton(
             icon: const Icon(Icons.close),
             onPressed: () async {
-              await windowManager.close();
+              Platform.isWindows ? await windowManager.close(): log("Window Closing...");
             },
           ),
         ],
